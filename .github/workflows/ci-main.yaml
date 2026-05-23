@@ -54,6 +54,7 @@ jobs:
       run: |
         dotnet test src/cartservice/
   deployment-tests:
+    if: ${{ vars.ENABLE_GCP_DEPLOYMENT_TESTS == 'true' }}
     runs-on: [self-hosted, is-enabled]
     needs: code-tests
     strategy:

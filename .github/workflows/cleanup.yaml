@@ -27,6 +27,7 @@ on:
       - '.github/workflows/terraform-validate-ci.yaml'
 jobs:
   cleanup-namespace:
+    if: ${{ vars.ENABLE_GCP_DEPLOYMENT_TESTS == 'true' }}
     runs-on: [self-hosted, is-enabled]
     steps:
       - name: Delete PR namespace in staging cluster

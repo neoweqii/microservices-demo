@@ -1,0 +1,189 @@
+name: "Continuous Deployment - Self Hosted"
+
+on:
+  workflow_run:
+    workflows:
+      - "Continuous Integration - Main/Release"
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: "Git ref to deploy"
+        required: false
+        default: "main"
+      image_tag:
+        description: "Override image tag"
+        required: false
+      include_loadgenerator:
+        description: "Deploy loadgenerator"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cd-self-hosted-${{ github.event.workflow_run.head_branch || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main')
+    runs-on: [self-hosted, is-enabled]
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.git_ref }}
+
+      - name: Resolve deployment settings
+        id: settings
+        shell: bash
+        env:
+          GITHUB_REPOSITORY_NAME: ${{ github.event.repository.name }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          INPUT_INCLUDE_LOADGENERATOR: ${{ inputs.include_loadgenerator }}
+          DEFAULT_INCLUDE_LOADGENERATOR: ${{ vars.CD_INCLUDE_LOADGENERATOR }}
+          DEFAULT_NAMESPACE: ${{ vars.CD_K8S_NAMESPACE }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${INPUT_IMAGE_TAG}" ]]; then
+            image_tag="${INPUT_IMAGE_TAG}"
+          else
+            image_tag="$(git rev-parse HEAD)"
+          fi
+
+          include_loadgenerator="${DEFAULT_INCLUDE_LOADGENERATOR:-false}"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            include_loadgenerator="${INPUT_INCLUDE_LOADGENERATOR:-false}"
+          fi
+
+          namespace="${DEFAULT_NAMESPACE:-online-boutique}"
+          image_registry="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/$(printf '%s' "${GITHUB_REPOSITORY_NAME}" | tr '[:upper:]' '[:lower:]')"
+
+          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "include_loadgenerator=${include_loadgenerator}" >> "${GITHUB_OUTPUT}"
+          echo "namespace=${namespace}" >> "${GITHUB_OUTPUT}"
+          echo "image_registry=${image_registry}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate CD configuration
+        shell: bash
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.CD_KUBECONFIG }}
+        run: |
+          set -euo pipefail
+          : "${KUBECONFIG_CONTENT:?Set secret CD_KUBECONFIG}"
+
+      - name: Login to GHCR
+        shell: bash
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${REGISTRY_PASSWORD}" | docker login ghcr.io --username "${REGISTRY_USERNAME}" --password-stdin
+
+      - name: Build and push images
+        shell: bash
+        env:
+          IMAGE_REGISTRY: ${{ steps.settings.outputs.image_registry }}
+          IMAGE_TAG: ${{ steps.settings.outputs.image_tag }}
+          INCLUDE_LOADGENERATOR: ${{ steps.settings.outputs.include_loadgenerator }}
+          PUSH_LATEST: "true"
+        run: bash ./.github/scripts/build-and-push-images.sh
+
+      - name: Configure kubeconfig
+        shell: bash
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.CD_KUBECONFIG }}
+          K8S_CONTEXT: ${{ vars.CD_K8S_CONTEXT }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.kube"
+          umask 077
+          printf '%s' "${KUBECONFIG_CONTENT}" > "${HOME}/.kube/config"
+
+          if [[ -n "${K8S_CONTEXT}" ]]; then
+            kubectl config use-context "${K8S_CONTEXT}"
+          fi
+
+      - name: Render deployment overlay
+        shell: bash
+        env:
+          OUTPUT_DIR: .github/tmp/self-hosted-cd
+          IMAGE_REGISTRY: ${{ steps.settings.outputs.image_registry }}
+          IMAGE_TAG: ${{ steps.settings.outputs.image_tag }}
+          K8S_NAMESPACE: ${{ steps.settings.outputs.namespace }}
+          INCLUDE_LOADGENERATOR: ${{ steps.settings.outputs.include_loadgenerator }}
+        run: bash ./.github/scripts/render-cd-kustomization.sh
+
+      - name: Create namespace
+        shell: bash
+        env:
+          K8S_NAMESPACE: ${{ steps.settings.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          kubectl create namespace "${K8S_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl apply -k .github/tmp/self-hosted-cd
+
+      - name: Wait for rollouts
+        shell: bash
+        env:
+          K8S_NAMESPACE: ${{ steps.settings.outputs.namespace }}
+          INCLUDE_LOADGENERATOR: ${{ steps.settings.outputs.include_loadgenerator }}
+        run: |
+          set -euo pipefail
+
+          deployments=(
+            "adservice"
+            "cartservice"
+            "redis-cart"
+            "checkoutservice"
+            "currencyservice"
+            "emailservice"
+            "frontend"
+            "paymentservice"
+            "productcatalogservice"
+            "recommendationservice"
+            "shippingservice"
+          )
+
+          if [[ "${INCLUDE_LOADGENERATOR}" == "true" ]]; then
+            deployments+=("loadgenerator")
+          fi
+
+          for deployment in "${deployments[@]}"; do
+            kubectl rollout status "deployment/${deployment}" --namespace "${K8S_NAMESPACE}" --timeout=300s
+          done
+
+      - name: Show deployed images
+        shell: bash
+        env:
+          K8S_NAMESPACE: ${{ steps.settings.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          kubectl get deployments --namespace "${K8S_NAMESPACE}" -o wide
+
+      - name: Dump cluster state on failure
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          K8S_NAMESPACE: ${{ steps.settings.outputs.namespace }}
+        run: |
+          set +e
+          kubectl get all --namespace "${K8S_NAMESPACE}"
+          kubectl get events --namespace "${K8S_NAMESPACE}" --sort-by=.metadata.creationTimestamp

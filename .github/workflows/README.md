@@ -27,6 +27,8 @@ These tests run on every commit for every open PR, as well as any commit to main
 4. Gets the LoadBalancer IP for the frontend service.
 5. Comments that IP in the pull request, for staging.
 
+In forks, these Google Cloud deployment tests are usually not available. In this repo they are disabled by default and can be re-enabled with the repository variable `ENABLE_GCP_DEPLOYMENT_TESTS=true`.
+
 ### Push and Deploy Latest - [push-deploy](push-deploy.yml)
 
 This is the Continuous Deployment workflow, and it runs on every commit to the main branch. This workflow:
@@ -35,6 +37,36 @@ This is the Continuous Deployment workflow, and it runs on every commit to the m
 2. Pushes those images to Google Container Registry.
 
 Note that this workflow does not update the image tags used in `release/kubernetes-manifests.yaml` - these release manifests are tied to a stable `v0.x.x` release.
+
+### Self-hosted Kubernetes CD - [cd-self-hosted.yaml](cd-self-hosted.yaml)
+
+This workflow deploys the fork to your own Kubernetes cluster from a self-hosted runner. It runs automatically after a successful `Continuous Integration - Main/Release` workflow on `main`, and can also be started manually.
+
+It performs the following steps:
+
+1. Builds and pushes the application images to GitHub Container Registry (`ghcr.io/<owner>/<repo>/<service>`), tagging them with the Git commit SHA and `latest`.
+2. Writes the `CD_KUBECONFIG` secret to the runner and optionally switches to `CD_K8S_CONTEXT`.
+3. Generates a temporary Kustomize overlay that points the Kubernetes manifests to the computed `ghcr.io` image paths and image tag.
+4. Applies the manifests into the configured namespace and waits for all deployments to roll out.
+
+Required repository configuration:
+
+- Optional variable `CD_K8S_NAMESPACE` (defaults to `online-boutique`)
+- Optional variable `CD_K8S_CONTEXT` when the kubeconfig contains more than one context
+- Optional variable `CD_INCLUDE_LOADGENERATOR=true` to deploy the loadgenerator service
+- Secret `CD_KUBECONFIG`
+
+GitHub Packages / GHCR details:
+
+- The workflow logs in to `ghcr.io` with `${{ github.actor }}` and `${{ secrets.GITHUB_TOKEN }}`, so no extra registry username/password secrets are required.
+- The registry path is derived automatically from the repository metadata and normalized to lowercase.
+- After the first successful push, open the package list in GitHub and mark each published container package as `Public`.
+- If the packages remain private, Kubernetes pods will fail with `ImagePullBackOff` until you add an `imagePullSecret` flow.
+
+Runner prerequisites:
+
+- A Linux self-hosted runner with `bash`, `docker`, and `kubectl`
+- Access from the runner to the target Kubernetes API and `ghcr.io`
 
 ### Cleanup - [cleanup.yaml](cleanup.yaml)
 
