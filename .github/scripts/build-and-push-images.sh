@@ -28,7 +28,7 @@ fi
 export DOCKER_BUILDKIT=1
 
 remote_image_exists() {
-  docker manifest inspect "$1" >/dev/null 2>&1
+  docker pull "$1" >/dev/null 2>&1
 }
 
 for service_definition in "${SERVICES[@]}"; do
@@ -47,7 +47,6 @@ for service_definition in "${SERVICES[@]}"; do
       fi
 
       echo "Reusing ${image_with_sha} to publish missing ${image_latest}"
-      docker pull "${image_with_sha}"
       docker tag "${image_with_sha}" "${image_latest}"
       docker push "${image_latest}"
       continue
