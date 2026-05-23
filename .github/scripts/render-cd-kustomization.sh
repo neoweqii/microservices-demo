@@ -8,6 +8,20 @@ set -euo pipefail
 : "${K8S_NAMESPACE:?K8S_NAMESPACE is required}"
 
 INCLUDE_LOADGENERATOR="${INCLUDE_LOADGENERATOR:-false}"
+MANIFESTS_DIR="${MANIFESTS_DIR:-kubernetes-manifests}"
+
+MANIFEST_FILES=(
+  "adservice.yaml"
+  "cartservice.yaml"
+  "checkoutservice.yaml"
+  "currencyservice.yaml"
+  "emailservice.yaml"
+  "frontend.yaml"
+  "paymentservice.yaml"
+  "productcatalogservice.yaml"
+  "recommendationservice.yaml"
+  "shippingservice.yaml"
+)
 
 mkdir -p "${OUTPUT_DIR}"
 
@@ -15,7 +29,8 @@ loadgenerator_resource=""
 loadgenerator_image=""
 
 if [[ "${INCLUDE_LOADGENERATOR}" == "true" ]]; then
-  loadgenerator_resource="  - ../../../kubernetes-manifests/loadgenerator.yaml"
+  MANIFEST_FILES+=("loadgenerator.yaml")
+  loadgenerator_resource="  - loadgenerator.yaml"
   loadgenerator_image=$(cat <<EOF
   - name: loadgenerator
     newName: ${IMAGE_REGISTRY}/loadgenerator
@@ -24,21 +39,25 @@ EOF
 )
 fi
 
+for manifest_file in "${MANIFEST_FILES[@]}"; do
+  cp "${MANIFESTS_DIR}/${manifest_file}" "${OUTPUT_DIR}/${manifest_file}"
+done
+
 cat > "${OUTPUT_DIR}/kustomization.yaml" <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: ${K8S_NAMESPACE}
 resources:
-  - ../../../kubernetes-manifests/adservice.yaml
-  - ../../../kubernetes-manifests/cartservice.yaml
-  - ../../../kubernetes-manifests/checkoutservice.yaml
-  - ../../../kubernetes-manifests/currencyservice.yaml
-  - ../../../kubernetes-manifests/emailservice.yaml
-  - ../../../kubernetes-manifests/frontend.yaml
-  - ../../../kubernetes-manifests/paymentservice.yaml
-  - ../../../kubernetes-manifests/productcatalogservice.yaml
-  - ../../../kubernetes-manifests/recommendationservice.yaml
-  - ../../../kubernetes-manifests/shippingservice.yaml
+  - adservice.yaml
+  - cartservice.yaml
+  - checkoutservice.yaml
+  - currencyservice.yaml
+  - emailservice.yaml
+  - frontend.yaml
+  - paymentservice.yaml
+  - productcatalogservice.yaml
+  - recommendationservice.yaml
+  - shippingservice.yaml
 ${loadgenerator_resource}
 images:
   - name: adservice

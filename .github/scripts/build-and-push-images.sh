@@ -27,11 +27,35 @@ fi
 
 export DOCKER_BUILDKIT=1
 
+remote_image_exists() {
+  docker manifest inspect "$1" >/dev/null 2>&1
+}
+
 for service_definition in "${SERVICES[@]}"; do
   IFS=":" read -r service_name build_context dockerfile_name <<< "${service_definition}"
 
   image_with_sha="${IMAGE_REGISTRY}/${service_name}:${IMAGE_TAG}"
   image_latest="${IMAGE_REGISTRY}/${service_name}:latest"
+
+  if remote_image_exists "${image_with_sha}"; then
+    echo "Image ${image_with_sha} already exists in registry"
+
+    if [[ "${PUSH_LATEST}" == "true" ]]; then
+      if remote_image_exists "${image_latest}"; then
+        echo "Image ${image_latest} already exists in registry, skipping ${service_name}"
+        continue
+      fi
+
+      echo "Reusing ${image_with_sha} to publish missing ${image_latest}"
+      docker pull "${image_with_sha}"
+      docker tag "${image_with_sha}" "${image_latest}"
+      docker push "${image_latest}"
+      continue
+    fi
+
+    echo "Skipping ${service_name}"
+    continue
+  fi
 
   echo "Building ${image_with_sha} from ${build_context}/${dockerfile_name}"
   docker build \
