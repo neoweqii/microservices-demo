@@ -22,6 +22,7 @@ components:
 # - components/memorystore
 # - components/network-policies
 # - components/non-public-frontend
+# - components/pod-autoscaling
 # - components/service-accounts
 # - components/alloydb
 # - components/single-shared-session
