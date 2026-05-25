@@ -4,11 +4,13 @@ This component adds `HorizontalPodAutoscaler` resources for:
 
 - `frontend`
 - `currencyservice`
+- `recommendationservice`
 
-These two services are good first autoscaling targets for Online Boutique:
+These services are good autoscaling targets for Online Boutique:
 
 - `frontend` is where your external traffic lands.
 - `currencyservice` is a hot path service that is called frequently by the frontend and is often one of the first backends to feel load.
+- `recommendationservice` participates in user-facing browse flows and can become busy during catalog and cart activity.
 
 ## Prerequisites
 
@@ -58,6 +60,7 @@ Useful commands:
 kubectl get hpa -w
 kubectl get pods -l app=frontend -w
 kubectl get pods -l app=currencyservice -w
+kubectl get pods -l app=recommendationservice -w
 kubectl top pods
 ```
 
