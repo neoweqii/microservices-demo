@@ -13,7 +13,7 @@ on:
         required: false
         default: "main"
       image_tag:
-        description: "Override image tag"
+        description: "Override image tag for all services"
         required: false
       include_loadgenerator:
         description: "Deploy loadgenerator"
@@ -57,9 +57,9 @@ jobs:
           set -euo pipefail
 
           if [[ -n "${INPUT_IMAGE_TAG}" ]]; then
-            image_tag="${INPUT_IMAGE_TAG}"
+            image_tag_override="${INPUT_IMAGE_TAG}"
           else
-            image_tag="$(git rev-parse HEAD)"
+            image_tag_override=""
           fi
 
           include_loadgenerator="${DEFAULT_INCLUDE_LOADGENERATOR:-false}"
@@ -70,7 +70,7 @@ jobs:
           namespace="${DEFAULT_NAMESPACE:-online-boutique}"
           image_registry="ghcr.io/$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/$(printf '%s' "${GITHUB_REPOSITORY_NAME}" | tr '[:upper:]' '[:lower:]')"
 
-          echo "image_tag=${image_tag}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag_override=${image_tag_override}" >> "${GITHUB_OUTPUT}"
           echo "include_loadgenerator=${include_loadgenerator}" >> "${GITHUB_OUTPUT}"
           echo "namespace=${namespace}" >> "${GITHUB_OUTPUT}"
           echo "image_registry=${image_registry}" >> "${GITHUB_OUTPUT}"
@@ -96,10 +96,31 @@ jobs:
         shell: bash
         env:
           IMAGE_REGISTRY: ${{ steps.settings.outputs.image_registry }}
-          IMAGE_TAG: ${{ steps.settings.outputs.image_tag }}
+          IMAGE_TAG_OVERRIDE: ${{ steps.settings.outputs.image_tag_override }}
+          IMAGE_TAGS_FILE: .github/tmp/self-hosted-cd-image-tags.env
+          BUILD_SUMMARY_FILE: .github/tmp/self-hosted-cd-build-summary.env
           INCLUDE_LOADGENERATOR: ${{ steps.settings.outputs.include_loadgenerator }}
           PUSH_LATEST: "true"
         run: bash ./.github/scripts/build-and-push-images.sh
+
+      - name: Show build reuse summary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          summary_file=".github/tmp/self-hosted-cd-build-summary.env"
+
+          if [[ ! -f "${summary_file}" ]]; then
+            echo "No build summary file found"
+            exit 1
+          fi
+
+          echo "Rebuild/reuse summary:"
+          while IFS='=' read -r service_name summary; do
+            status="${summary%%:*}"
+            tag="${summary#*:}"
+            echo "- ${service_name}: ${status} (${tag})"
+          done < "${summary_file}"
 
       - name: Configure kubeconfig
         shell: bash
@@ -121,7 +142,8 @@ jobs:
         env:
           OUTPUT_DIR: .github/tmp/self-hosted-cd
           IMAGE_REGISTRY: ${{ steps.settings.outputs.image_registry }}
-          IMAGE_TAG: ${{ steps.settings.outputs.image_tag }}
+          IMAGE_TAG_OVERRIDE: ${{ steps.settings.outputs.image_tag_override }}
+          IMAGE_TAGS_FILE: .github/tmp/self-hosted-cd-image-tags.env
           K8S_NAMESPACE: ${{ steps.settings.outputs.namespace }}
           INCLUDE_LOADGENERATOR: ${{ steps.settings.outputs.include_loadgenerator }}
         run: bash ./.github/scripts/render-cd-kustomization.sh

@@ -44,9 +44,10 @@ This workflow deploys the fork to your own Kubernetes cluster from a self-hosted
 
 It performs the following steps:
 
-1. Builds and pushes the application images to GitHub Container Registry (`ghcr.io/<owner>/<repo>/<service>`), tagging them with the Git commit SHA and `latest`.
+1. Builds and pushes the application images to GitHub Container Registry (`ghcr.io/<owner>/<repo>/<service>`). By default each service image is tagged from the Git tree hash of its own build context, so unchanged services are reused across commits instead of being rebuilt. It also updates `latest`.
+   The workflow then prints a per-service summary showing which images were `rebuilt` and which were `reused`.
 2. Writes the `CD_KUBECONFIG` secret to the runner and optionally switches to `CD_K8S_CONTEXT`.
-3. Generates a temporary Kustomize overlay that points the Kubernetes manifests to the computed `ghcr.io` image paths and image tag.
+3. Generates a temporary Kustomize overlay that points the Kubernetes manifests to the computed `ghcr.io` image paths and the per-service tags discovered during the build step.
 4. Applies the manifests into the configured namespace and waits for all deployments to roll out.
 
 Required repository configuration:
@@ -55,6 +56,10 @@ Required repository configuration:
 - Optional variable `CD_K8S_CONTEXT` when the kubeconfig contains more than one context
 - Optional variable `CD_INCLUDE_LOADGENERATOR=true` to deploy the loadgenerator service
 - Secret `CD_KUBECONFIG`
+
+Manual dispatch note:
+
+- `image_tag` remains available as a shared override when you want every service to deploy from the same prebuilt tag.
 
 GitHub Packages / GHCR details:
 
