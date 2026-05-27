@@ -320,6 +320,10 @@ main {
   margin-top: 56px;
   font-size: 36px;
   font-weight: normal;
+  color: #0f766e;
+  display: inline-block;
+  border-bottom: 4px solid #14b8a6;
+  padding-bottom: 8px;
 }
 
 .hot-products-row {
@@ -338,6 +342,7 @@ main {
   width: 100%;
   height: auto;
   border-radius: 20% 0 20% 20%;
+  box-shadow: 0 18px 40px rgba(15, 118, 110, 0.12);
 }
 
 .hot-product-card-name {
@@ -365,7 +370,7 @@ main {
 }
 
 .hot-product-card:hover .hot-product-card-img-overlay {
-  background-color: rgba(71, 0, 29, 0.2);
+  background-color: rgba(20, 184, 166, 0.2);
 }
 
 /*
